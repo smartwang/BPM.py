@@ -1,3 +1,4 @@
+# coding: utf-8
 import cPickle
 import pickle
 import stackless
@@ -6,6 +7,48 @@ from celery import task
 
 from .models import Defination, Process, Task
 from .process import join, BaseProcess
+
+
+@task()
+def task_manager(name, task_id):    # name 应该是完整名称
+    try:
+        defination = Defination.objects.get(name=name)
+    except Defination.DoesNotExist:
+        pass
+    else:
+        ns = {
+            '__builtins__': None,
+            '__name__': __name__,
+            'BaseProcess': BaseProcess,     # TODO: 添加BaseComponent
+            'join': 'join',
+            }
+        code = compile(defination.content, '<stdin>', 'exec')
+
+        try:
+            exec code in ns
+        except:
+            pass
+
+        cls = ns[name]
+        globals()[name] = cls   # 这个class可能是一个过程(继承于BaseProcess)，也可能是一个组件(继承于BaseComponent)
+
+        try:
+            t = Task.objects.get(pk=task_id)
+        except:
+            pass    # TODO
+
+        try:
+            args = pickle.loads(t.args)
+            kwargs = pickle.loads(t.kwargs)
+        except:
+            args = None
+            kwargs = None
+            pass    # TODO error log
+
+        # cls.start(args, kwargs)
+        # callback.apply_async(args=(task_id, ))
+        if issubclass(cls, BaseProcess):    # TODO: 检查是否为子过程以及调用权限
+            start.delay(name, task_id=task_id, *args, **kwargs)
 
 
 @task()
@@ -51,6 +94,9 @@ def schedule(process_id):
 
         if process.is_complete():
             Process.objects.filter(pk=p.pk).update(state=2)
+            if p.is_subprocess:
+                # TODO: callback as a component,  need a task_id
+                pass
 
         map(lambda x: x.kill(), process._tasklets)
     else:
@@ -95,7 +141,7 @@ def callback(task_id, result):
 
 
 @task()
-def start(name, *args, **kwargs):
+def start(name, task_id=None, *args, **kwargs):
 
     try:
         defination = Defination.objects.get(name=name)
@@ -106,7 +152,6 @@ def start(name, *args, **kwargs):
             '__builtins__': None,
             '__name__': __name__,
             'BaseProcess': BaseProcess,
-            'join': 'join',
         }
         code = compile(defination.content, '<stdin>', 'exec')
 

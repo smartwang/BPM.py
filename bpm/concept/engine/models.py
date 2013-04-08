@@ -29,9 +29,11 @@ class Process(models.Model):
         ),
         default=0,
     )
-    is_subprocess = models.BooleanField(
-        default=False,
-    )
+    # is_subprocess = models.BooleanField(
+    #     default=False,
+    # )
+
+    parent_process = models.ForeignKey('self', null=True)
     is_locked = models.BooleanField(
         default=False,
     )
