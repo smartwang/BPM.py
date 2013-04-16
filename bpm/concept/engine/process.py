@@ -4,7 +4,9 @@ import stackless
 
 from .base import BaseTask
 from .models import Process, Task, Defination
-#from .tasks import start, schedule, task_manager, callback
+from .tasks import start, schedule, task_manager, callback
+import time
+
 
 def join(*handlers):
     for handler in handlers:
@@ -12,7 +14,6 @@ def join(*handlers):
 
 
 class TaskHandler(object):
-
     def __init__(self, cls, target, predecessors):
         if not self in cls._handlers:
             print "#" * 40
@@ -105,44 +106,93 @@ class TaskHandler(object):
 class BaseComponent(BaseTask):
     """
         组件类需要继承此类
-        并实现 start/on_callback 方法
+        并实现 start 方法
+        如果组件调用的接口是异步的，建议使用辅助方法进行同步化
+        辅助方法会提供多种轮询算法，特别对于审批、定时之类的耗时比较长的任务比较适用
     """
-    def __init__(self, defination_id, *args, **kwargs):
-        super(BaseComponent, self).__init__(namespace='', *args, **kwargs)      # todo：namespace改为必填参数
+    enable_schedule = False
+    algorithm = None
 
-    def start(self):
+    def __init__(self, *args, **kwargs):
+        super(BaseComponent, self).__init__(namespace='', *args, **kwargs)      # todo：namespace改为必填参数
+        self.result = None
+
+    def init(self, defination_id, task_id):
+        """组件和一个过程不同，不能直接执行，只能通过一个任务来启动"""
+        if not task_id:
+            return False, "need task_id"
+        try:
+            self.task = Task.objects.get(pk=task_id)
+        except Task.DoesNotExist:
+            return False, "task instance not exist， task_id=%s" % task_id
+
+    def start(self, *args, **kwargs):
         """
-            start方法需要组件开发者实现, 如果没有定义on_callback方法，则返回的值会直接作为组件的结果进行 callback(celery task)
+        start方法需要组件开发者实现, 如cc接口调用， 如果没有设置self.enable_schedule=True，
+        则返回的值会直接作为组件的结果进行 callback(celery task)
         """
         raise NotImplementedError
 
-    def on_callback(self):
-        """"""
-        return None
+    def run(self, *args, **kwargs):
+        self.result = self.start(*args, **kwargs)
+        if self.enable_schedule:
+            self._schedule(*args, **kwargs)  # 在self._schedule里决定是否callback
+        else:
+            self._callback()
 
-    def schedule(self, algorithm=None, *args, **kwargs):
+    def sync(self, *args, **kwargs):
+        """
+        组件开发者需要实现的方法, bool方法
+        该方法发生在start方法的结果返回之后
+        如果start方法是一个异步的请求，则可在sync方法中依据结果进行轮询查询
+        sync方法返回true后就进行callback，反之则继续轮询
+
+        要使用sync方法，需要设置 self.enable_schedule = True
+        """
+        raise NotImplementedError
+
+    def _schedule(self, *args, **kwargs):
         """
             辅助方法
-            对于异步调用的接口，可以通过实现on_callback方法，来实现异步任务的同步化
+            对于异步调用的接口，可以通过实现sync方法，来实现异步任务的同步化
         """
-        raise NotImplementedError
+        # TODO: 实现 algorithm
+        while not self.sync(*args, **kwargs):
+            time.sleep(5)
+        self._callback()
 
+    def _callback(self):
+        """任务完成的通知"""
+        self.task.result = self.result
+        callback.delay(self.task.id, self.result)
 
 
 class BaseProcess(BaseTask):
-
-    def __init__(self, defination_id, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super(BaseProcess, self).__init__(namespace='', *args, **kwargs)
-
+        self.result = None
         self._handlers = []
         self._tasklets = []
 
-        process = Process(defination=Defination.objects.get(pk=defination_id))
-        try:
-            process.save()
-        except:
-            pass
-        else:
+    def init(self, defination_id, task_id):
+        """
+            对于BaseProcess, init方法负责创建任务实例及过程实例，若为子过程(task是事先创建了的)，则只创建过程实例
+
+        """
+        if task_id:  # subprocess
+            try:
+                task = Task.objects.get(id=task_id)  # 这个task的process指向的是父过程
+                process = Process(defination=Defination.objects.get(pk=defination_id, task=task))
+                self.process_id = process.id
+            except Task.DoesNotExist:
+                pass  # TODO: task_id对应的task不存在后的异常处理, 正常情况下不应该走到这个分支
+        else:   # new process
+            process = Process(defination=Defination.objects.get(pk=defination_id))
+            process.save()      # TODO: try一下?
+            task = Task(process=Process.objects.get(pk=defination_id, process=process))
+            task.save()  # 保存任务
+            process.task = task
+            process.save()      # TODO: 两次save :(  这里不知道有没有更好的处理方式
             self.process_id = process.id
 
     def add_handler(self, handler):
@@ -167,6 +217,32 @@ class BaseProcess(BaseTask):
         print "#" * 40
         return run_count - 1 > count
 
+    def _callback(self):
+        """子过程任务完成后进行回调"""
+        pass    # TODO: to be implemented
+
+    def stop(self):
+        """"""
+        pass
+
+    def get_result(self, null=True):
+        """
+        该方法可由过程开发者进行覆盖
+        在callback时调用
+        """
+        if null:  # 不需要给别人结果的过程
+            return None
+        else:   # 需要给出一个结果的过程调用，通常子过程需要这个东西(当然也不是必须的)
+
+            pass
+
+    def on_complete(self):
+        """
+        过程完成后进行回调
+        """
+        self.get_result()
+        pass
+
     def is_complete(self):
         run_count = 0
         for tasklet in self._tasklets:
@@ -180,12 +256,14 @@ class BaseProcess(BaseTask):
             for handler in self._handlers:
                 if handler.instance().is_complete:
                     x += 1
-
             if len(self._handlers) <= x:
                 return True
 
-    def initiate(self, *args, **kwargs):
+    def run(self, *args, **kwargs):
         self.add_tasklet(stackless.tasklet(self.start)(*args, **kwargs))
+        Process.objects.filter(pk=self.process_id).update(pickled=cPickle.dumps(self))
+        map(lambda x: x.kill(), self._tasklets)
+        schedule.apply_async(args=(self.process_id,))
 
     def instance(self):
         try:

@@ -1,3 +1,4 @@
+# coding: utf-8
 # Access Control Levels
 ACL_DEFAULT = 0
 ACL_PUBLIC = 1
@@ -24,3 +25,13 @@ class BaseTask(object):
 
     def __init__(self, namespace):
         self.namespace = namespace
+
+    def init(self, defination_id, task_id):
+        """
+            可根据需要覆盖该方法
+        """
+        pass
+
+    def run(self, *args, **kwargs):
+        """框架需实现的方法，负责节点逻辑的执行"""
+        raise NotImplementedError
