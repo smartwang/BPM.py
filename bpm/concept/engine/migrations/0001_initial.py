@@ -33,7 +33,7 @@ class Migration(SchemaMigration):
         db.create_table(u'engine_process', (
             (u'id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
             ('defination', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['engine.Defination'])),
-            ('task', self.gf('django.db.models.fields.related.ForeignKey')(related_name=u'task', to=orm['engine.Task'])),
+            ('task', self.gf('django.db.models.fields.related.OneToOneField')(related_name=u'task', unique=True, null=True, to=orm['engine.Task'])),
             ('state', self.gf('django.db.models.fields.PositiveSmallIntegerField')(default=0)),
             ('is_locked', self.gf('django.db.models.fields.BooleanField')(default=False)),
             ('pickled', self.gf('django.db.models.fields.TextField')(db_column='pickle')),
@@ -67,7 +67,7 @@ class Migration(SchemaMigration):
             'is_locked': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
             'pickled': ('django.db.models.fields.TextField', [], {'db_column': "'pickle'"}),
             'state': ('django.db.models.fields.PositiveSmallIntegerField', [], {'default': '0'}),
-            'task': ('django.db.models.fields.related.ForeignKey', [], {'related_name': "u'task'", 'to': u"orm['engine.Task']"})
+            'task': ('django.db.models.fields.related.OneToOneField', [], {'related_name': "u'task'", 'unique': 'True', 'null': 'True', 'to': u"orm['engine.Task']"})
         },
         u'engine.task': {
             'Meta': {'object_name': 'Task'},

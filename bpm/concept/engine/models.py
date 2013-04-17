@@ -40,7 +40,7 @@ class Process(models.Model):
         choices=(
             (0, 'STARTED'),
             (1, 'PAUSED'),
-            (2, 'COMPLETE'),
+            (2, 'COMPLETED'),
             (3, 'TERMINATED'),
             (4, 'INTERRUPTED'),
             (5, 'REVOKED'),
