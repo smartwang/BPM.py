@@ -102,10 +102,22 @@ def schedule(process_id):
         process = cPickle.loads(str(p.pickled))
         print "$" * 40
         print "try to resume"
+
+        # if p.task.process != p:
+        #     import sys
+        #     sys.path.extend(['D:\\develop\\BPM.py\\bpm',
+        #                      'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pycharm',
+        #                      'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pydev'])
+        #     import pydevd
+        #     pydevd.settrace('localhost', port=8023, stdoutToServer=True, stderrToServer=True)
+        #     pass  # for debug, to see subprocess status after stackless.schedule()
+
         process.resume()
 
         stackless.schedule()
         print "after schedule"
+
+
         while process.can_continue():
             print "#" * 40
             print "Process %d can continue" % process.process_id
@@ -196,7 +208,7 @@ def start(name, task_id, *args, **kwargs):
         # 因为start本身是通过启动器(新建过程实例时)或者TaskHandler调用celery的task_manager来执行的，
         # 因此这里就不需要再放到另外的celery中跑逻辑了
         print "#" * 40
-        print "call init whith def_id=%s, task_id=%s" % (defination.id, task_id)
+        print "call init with def_id=%s, task_id=%s" % (defination.id, task_id)
         print "#" * 40
 
         obj.init(defination_id=defination.id, task_id=task_id)
@@ -221,7 +233,7 @@ class TaskHandler(object):
             print "#" * 40
             print "Create handler for task %s" % target
             print "#" * 40
-            self.blocked = False
+            self.blocked = 0  # 0: unread; 1: unblock; 2: block
             self.cls = cls
             self.target = target
             self.predecessors = predecessors
@@ -247,7 +259,6 @@ class TaskHandler(object):
 
     def handle(self, *args, **kwargs):
         """
-
         """
         if self.predecessors:
             join(*self.predecessors)
@@ -300,12 +311,12 @@ class TaskHandler(object):
             print "#" * 40
             print "Task %d blocked" % self.task_id
             print "#" * 40
-            self.blocked = True
+            self.blocked = 2
             stackless.schedule()
             task = self.instance()
 
         Task.objects.filter(pk=self.task_id).update(is_confirmed=True)
-        self.blocked = False
+        self.blocked = 1
         return task
 
 
@@ -394,6 +405,15 @@ class BaseProcess(BaseTask):
             print "subprocess"
             print "#" * 40
             try:
+
+                # import sys
+                # sys.path.extend(['D:\\develop\\BPM.py\\bpm',
+                #                  'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pycharm',
+                #                  'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pydev'])
+                # import pydevd
+                # pydevd.settrace('localhost', port=8023, stdoutToServer=True, stderrToServer=True)
+                # pass  # for debug, to see subprocess status after stackless.schedule()
+
                 task = Task.objects.get(id=task_id)  # 这个task的process指向的是父过程
                 process = Process(defination=Defination.objects.get(pk=defination_id), task=task)
                 process.save()
@@ -425,17 +445,20 @@ class BaseProcess(BaseTask):
         count = 0
         for handler in self._handlers:
             print "=" * 40
-            if handler.blocked:
+            if handler.blocked == 2:
                 print "handler blocked +1"
                 count += 1
+            # if handler.blocked == 0:
+            #     print "found an unread handler, count +1"
+            #     count += 1
         run_count = 0
         for tasklet in self._tasklets:
             if tasklet.alive:
                 run_count += 1
         print "#" * 40
-        print "run_count: %d, handlers: %d, blocked_handlers: %d" % (run_count, len(self._handlers), count)
+        print "run_count: %d, handlers: %d, tasklets:%d, blocked_handlers: %d" % (run_count, len(self._handlers), len(self._tasklets), count)
         print "#" * 40
-        return run_count - 1 > count
+        return (run_count > count) or (len(self._tasklets) == 1 and run_count > 0)
 
     def _callback(self):
         """子过程任务完成后进行回调"""
