@@ -14,6 +14,9 @@ class Defination(models.Model):
     )
     content = models.TextField()
 
+    def __unicode__(self):
+        return self.name
+
 
 class Task(models.Model):
     """
@@ -30,6 +33,9 @@ class Task(models.Model):
     )
     process = models.ForeignKey('Process', verbose_name=u'所属process', related_name=u'process')
     result = models.TextField()
+
+    def __unicode__(self):
+        return  u"%s的task" %self.process.defination.name
 
 
 class Process(models.Model):
@@ -52,4 +58,5 @@ class Process(models.Model):
         default=False,
     )
     pickled = models.TextField(db_column='pickle')
-
+    def __unicode__(self):
+        return  u"%s的process" %self.defination.name

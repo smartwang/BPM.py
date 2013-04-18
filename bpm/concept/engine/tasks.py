@@ -117,7 +117,6 @@ def schedule(process_id):
         stackless.schedule()
         print "after schedule"
 
-
         while process.can_continue():
             print "#" * 40
             print "Process %d can continue" % process.process_id
