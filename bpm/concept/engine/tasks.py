@@ -451,13 +451,13 @@ class BaseProcess(BaseTask):
             #     print "found an unread handler, count +1"
             #     count += 1
         run_count = 0
-        for tasklet in self._tasklets:
+        for tasklet in self._tasklets[1:]:
             if tasklet.alive:
                 run_count += 1
         print "#" * 40
         print "run_count: %d, handlers: %d, tasklets:%d, blocked_handlers: %d" % (run_count, len(self._handlers), len(self._tasklets), count)
         print "#" * 40
-        return (run_count > count) or (len(self._tasklets) == 1 and run_count > 0)
+        return run_count > count   # or (len(self._tasklets) == 1 and run_count > 0)
 
     def _callback(self):
         """子过程任务完成后进行回调"""
