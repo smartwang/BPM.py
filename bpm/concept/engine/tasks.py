@@ -7,7 +7,10 @@ from celery import task
 
 from concept.engine.models import Defination, Process, Task
 from concept.engine.base import BaseTask
+from django.db import transaction
+
 import time
+
 
 @task()
 def task_manager(name, task_id):    # name 应该是完整名称
@@ -103,14 +106,16 @@ def schedule(process_id):
         print "$" * 40
         print "try to resume"
 
-        # if p.task.process != p:
-        #     import sys
-        #     sys.path.extend(['D:\\develop\\BPM.py\\bpm',
-        #                      'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pycharm',
-        #                      'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pydev'])
-        #     import pydevd
-        #     pydevd.settrace('localhost', port=8023, stdoutToServer=True, stderrToServer=True)
-        #     pass  # for debug, to see subprocess status after stackless.schedule()
+        #if p.task.process == p:  # debug master process
+        if p.task.process != p:   # debug subprocess
+            import sys
+
+            sys.path.extend(['D:\\develop\\BPM.py\\bpm',
+                             'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pycharm',
+                             'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pydev'])
+            import pydevd
+            #pydevd.settrace('localhost', port=8023, stdoutToServer=True, stderrToServer=True)
+            pass  # for debug, to see subprocess status after stackless.schedule()
 
         process.resume()
 
@@ -160,6 +165,14 @@ def confirm(task_id):
 
 @task()
 def callback(task_id, result):
+    import sys
+
+    sys.path.extend(['D:\\develop\\BPM.py\\bpm',
+                     'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pycharm',
+                     'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pydev'])
+    import pydevd
+    #pydevd.settrace('localhost', port=8024, stdoutToServer=True, stderrToServer=True)
+    pass  # for debug
     try:
         t = Task.objects.get(pk=task_id)
     except Task.DoesNotExist:
@@ -223,6 +236,8 @@ def start(name, task_id, *args, **kwargs):
 
 def join(*handlers):
     for handler in handlers:
+        handler.blocked = 2
+    for handler in handlers:
         handler.wait()
 
 
@@ -277,7 +292,7 @@ class TaskHandler(object):
         Task.objects.filter(pk=self.task_id).update(
             args=cPickle.dumps(cleaned_args),
             kwargs=cPickle.dumps(cleaned_kwargs),
-            )
+        )
 
         # TODO: 实现任务管理器，进行实际的任务调用.
         # TODO: 需要处理requirement
@@ -288,9 +303,10 @@ class TaskHandler(object):
         print
         task_manager.apply_async(args=(self.target, self.task_id))
 
+    @transaction.commit_on_success()
     def instance(self):
         try:
-            task = Task.objects.get(pk=self.task_id)
+            task = Task.objects.select_related().get(pk=self.task_id)
         except Task.DoesNotExist:
             pass
         else:
@@ -305,6 +321,16 @@ class TaskHandler(object):
 
     def wait(self):
         task = self.instance()
+
+        import sys
+
+        sys.path.extend(['D:\\develop\\BPM.py\\bpm',
+                         'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pycharm',
+                         'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pydev'])
+        import pydevd
+        #pydevd.settrace('localhost', port=8025, stdoutToServer=True, stderrToServer=True)
+        pass  # for debug
+
         while not task.is_complete:
             # do something
             print "#" * 40
@@ -352,6 +378,15 @@ class BaseComponent(BaseTask):
 
     def run(self, *args, **kwargs):
         print "before start"
+
+        # import sys
+        # sys.path.extend(['D:\\develop\\BPM.py\\bpm',
+        #                  'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pycharm',
+        #                  'D:\\Program Files\\JetBrains\\PyCharm 2.7.1\\helpers\\pydev'])
+        # import pydevd
+        # pydevd.settrace('localhost', port=8023, stdoutToServer=True, stderrToServer=True)
+        # pass  # for debug
+
         self.result = self.start(*args, **kwargs)
         print "after start"
         if self.enable_schedule:
@@ -441,23 +476,29 @@ class BaseProcess(BaseTask):
             self._tasklets.append(tasklet)
 
     def can_continue(self):
-        count = 0
+        blocked_handlers = 0
         for handler in self._handlers:
             print "=" * 40
             if handler.blocked == 2:
                 print "handler blocked +1"
-                count += 1
-            # if handler.blocked == 0:
-            #     print "found an unread handler, count +1"
-            #     count += 1
-        run_count = 0
+                blocked_handlers += 1
+                # if handler.blocked == 0:
+                #     print "found an unread handler, count +1"
+                #     count += 1
+        alive_tasklet = 0
         for tasklet in self._tasklets[1:]:
             if tasklet.alive:
-                run_count += 1
+                alive_tasklet += 1
         print "#" * 40
-        print "run_count: %d, handlers: %d, tasklets:%d, blocked_handlers: %d" % (run_count, len(self._handlers), len(self._tasklets), count)
+        print "alive_tasklet: %d, handlers: %d, tasklets:%d, blocked_handlers: %d" % (
+            alive_tasklet, len(self._handlers), len(self._tasklets), blocked_handlers)
         print "#" * 40
-        return run_count > count   # or (len(self._tasklets) == 1 and run_count > 0)
+
+        if self._tasklets[0].alive:
+            can_continue = alive_tasklet - 1 > blocked_handlers
+        else:
+            can_continue = alive_tasklet > blocked_handlers
+        return can_continue   # or (len(self._tasklets) == 1 and run_count > 0)
 
     def _callback(self):
         """子过程任务完成后进行回调"""
@@ -517,6 +558,7 @@ class BaseProcess(BaseTask):
         print "#" * 40
         schedule.apply_async(args=(self.process_id,))
 
+    @transaction.commit_on_success()
     def instance(self):
         try:
             process = Process.objects.get(pk=self.process_id)
@@ -526,16 +568,17 @@ class BaseProcess(BaseTask):
             return process
 
     def resume(self):
-        for t in self._tasklets:
-            print "-" * 40
-            if not t.alive:
-                print "remove inactive tasklet"
-                self._tasklets.remove(t)
-
+        # for t in self._tasklets:
+        #     print "-" * 40
+        #     if not t.alive:
+        #         print "remove inactive tasklet"
+        #         #self._tasklets.remove(t)
+        #         pass
         for t in self._tasklets:
             try:
                 print "insert tasklet"
-                t.insert()
+                if t.alive:
+                    t.insert()
             except:
                 pass
 
